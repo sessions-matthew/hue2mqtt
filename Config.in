@@ -1,0 +1,4 @@
+config BR2_PACKAGE_HUE2MQTT
+  bool "hue2mqtt"
+  help
+    none

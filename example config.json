@@ -1,0 +1,19 @@
+{
+    "mqtt_host": "",
+    "mqtt_user": "",
+    "mqtt_pass": "",
+    "hue_lights": [
+        {
+            "mac": "",
+            "availability_topic": "",
+            "set_topic": "",
+            "status_topic":""
+        },
+        {
+            "mac": "",
+            "availability_topic": "",
+            "set_topic": "",
+            "status_topic":""
+        }
+    ]
+}
