@@ -16,7 +16,6 @@ int HueDevice::light_power_set(uint8_t level) {
 }
 
 int HueDevice::light_power_notify_get() {
-  device_connect_check();
   if (this->light_power_fd == 0) {
     this->light_power_fd = this->gatt_notify_char("002c", "002f");
   }
@@ -34,7 +33,6 @@ int HueDevice::light_brightness_set(uint8_t level) {
 }
 
 int HueDevice::light_brightness_notify_get() {
-  device_connect_check();
   if (this->light_brightness_fd == 0) {
     this->light_brightness_fd = this->gatt_notify_char("002c", "0032");
   }
