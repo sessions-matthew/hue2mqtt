@@ -15,6 +15,14 @@ int HueDevice::light_power_set(uint8_t level) {
   return this->gatt_write_char_byte("002c", "002f", level);
 }
 
+int HueDevice::light_power_notify_get() {
+  device_connect_check();
+  if (this->light_power_fd == 0) {
+    this->light_power_fd = this->gatt_notify_char("002c", "002f");
+  }
+  return this->light_power_fd;
+}
+
 int HueDevice::light_brightness_get() {
   device_connect_check();
   return this->gatt_read_char_byte("002c", "0032");
@@ -23,6 +31,14 @@ int HueDevice::light_brightness_get() {
 int HueDevice::light_brightness_set(uint8_t level) {
   device_connect_check();
   return this->gatt_write_char_byte("002c", "0032", level);
+}
+
+int HueDevice::light_brightness_notify_get() {
+  device_connect_check();
+  if (this->light_brightness_fd == 0) {
+    this->light_brightness_fd = this->gatt_notify_char("002c", "0032");
+  }
+  return this->light_brightness_fd;
 }
 
 HueDevice::Power::Power(HueDevice *p): parent(p) {}

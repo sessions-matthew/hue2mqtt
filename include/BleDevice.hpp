@@ -25,4 +25,5 @@ public:
   
   int gatt_read_char_byte(std::string service, std::string characteristic);
   int gatt_write_char_byte(std::string service, std::string characteristic, uint8_t byte);
+  int gatt_notify_char(std::string service, std::string characteristic);
 };

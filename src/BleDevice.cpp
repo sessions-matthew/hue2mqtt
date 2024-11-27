@@ -68,6 +68,34 @@ int BleDevice::gatt_write_char_byte(std::string service, std::string characteris
 	return 0;
 }
 
+int BleDevice::gatt_notify_char(std::string service, std::string characteristic)
+{
+	uint16_t byte = 0;
+
+	::dbus_error_init(&dbus_error);
+	dbus_msg = dbus_message_new_method_call("org.bluez",
+						(this->devicePath + "/service" + service + "/char" + characteristic).c_str(),
+						"org.bluez.GattCharacteristic1", "AcquireNotify");
+	if (dbus_msg != nullptr) {
+		dbus_message_iter_init_append(dbus_msg, &this->iter0);
+		dbus_message_iter_open_container(&this->iter0, DBUS_TYPE_ARRAY, "{sv}", &this->iter1);
+		dbus_message_iter_close_container(&this->iter0, &this->iter1);
+		dbus_reply = ::dbus_connection_send_with_reply_and_block(bleManager.getConn(), this->dbus_msg,
+									 DBUS_TIMEOUT_USE_DEFAULT, &dbus_error);
+
+		if (dbus_reply != nullptr) {
+			dbus_message_iter_init(dbus_reply, &this->iter0);
+			dbus_message_iter_get_basic(&this->iter0, &byte);
+			dbus_message_unref(dbus_reply);
+		} else {
+			::perror(dbus_error.name);
+			::perror(dbus_error.message);
+		}
+		dbus_message_unref(dbus_msg);
+	}
+	return byte;
+}
+
 // PHILIPS_POWER_UUID = "932c32bd-0002-47a2-835a-a8d455b859dd"
 // PHILIPS_LEVEL_UUID = "932c32bd-0003-47a2-835a-a8d455b859dd"
 

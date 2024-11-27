@@ -22,10 +22,15 @@ public:
     void operator = (const uint8_t level);
     int operator()();
   } brightness;
+
+  int light_power_fd;
+  int light_brightness_fd;
   
   int light_power_get();
   int light_power_set(uint8_t level);
+  int light_power_notify_get();
 
   int light_brightness_get();
   int light_brightness_set(uint8_t level);
+  int light_brightness_notify_get();
 };
