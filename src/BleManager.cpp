@@ -43,6 +43,12 @@ int BleManager::ble_power_get()
 	DBusMessageIter iter0, iter1, iter2;
 	DBusError dbus_error;
 	dbus_bool_t dbus_bool = FALSE;
+	auto connPtr = this->getConn();
+
+	if (connPtr == nullptr) {
+		syslog(LOG_DEBUG, "DBUS connection is null");
+		return 0;
+	}
 
 	::dbus_error_init(&dbus_error);
 	dbus_msg = ::dbus_message_new_method_call("org.bluez", "/org/bluez/hci0", "org.freedesktop.DBus.Properties", "Get");
@@ -50,7 +56,7 @@ int BleManager::ble_power_get()
 		::dbus_message_iter_init_append(dbus_msg, &iter0);
 		::dbus_message_iter_append_basic(&iter0, DBUS_TYPE_STRING, &adapter);
 		::dbus_message_iter_append_basic(&iter0, DBUS_TYPE_STRING, &property);
-		dbus_reply = ::dbus_connection_send_with_reply_and_block(this->getConn(), dbus_msg, DBUS_TIMEOUT_USE_DEFAULT, &dbus_error);
+		dbus_reply = ::dbus_connection_send_with_reply_and_block(connPtr, dbus_msg, DBUS_TIMEOUT_USE_DEFAULT, &dbus_error);
 		if (dbus_reply != nullptr) {
 			dbus_message_iter_init(dbus_reply, &iter0);
 			dbus_message_iter_recurse(&iter0, &iter1);
@@ -69,6 +75,12 @@ int BleManager::ble_power_set(int state)
 	DBusMessageIter iter0, iter1, iter2;
 	DBusError dbus_error;
 	dbus_bool_t dbus_bool = state;
+	auto connPtr = this->getConn();
+
+	if (connPtr == nullptr) {
+		syslog(LOG_DEBUG, "DBUS connection is null");
+		return -1;
+	}
 
 	::dbus_error_init(&dbus_error);
 	dbus_msg = ::dbus_message_new_method_call("org.bluez", "/org/bluez/hci0", "org.freedesktop.DBus.Properties", "Set");
@@ -80,7 +92,7 @@ int BleManager::ble_power_set(int state)
 		::dbus_message_iter_append_basic(&iter1, DBUS_TYPE_BOOLEAN, &dbus_bool);
 		::dbus_message_iter_close_container(&iter0, &iter1);
 
-		dbus_reply = ::dbus_connection_send_with_reply_and_block(getConn(), dbus_msg, DBUS_TIMEOUT_USE_DEFAULT, &dbus_error);
+		dbus_reply = ::dbus_connection_send_with_reply_and_block(connPtr, dbus_msg, DBUS_TIMEOUT_USE_DEFAULT, &dbus_error);
 		dbus_message_unref(dbus_msg);
 		if (dbus_reply != nullptr)
 			dbus_message_unref(dbus_reply);
