@@ -1,13 +1,14 @@
 #pragma once
-#include <dbus/dbus.h>
-#include <string>
-#include <map>
 #include "BleDevice.hpp"
+#include <dbus/dbus.h>
+#include <map>
+#include <string>
 
 class BleManager {
   DBusConnection *conn = nullptr;
+
 public:
-  BleManager ();
+  BleManager();
 
   DBusConnection *getConn();
 

@@ -2,7 +2,7 @@
 #include <iostream>
 
 HueDevice::HueDevice(std::string mac)
-  : BleDevice(mac), power(this), brightness(this) { }
+    : BleDevice(mac), power(this), brightness(this) {}
 
 int HueDevice::light_power_get() {
   device_connect_check();
@@ -11,7 +11,8 @@ int HueDevice::light_power_get() {
 
 int HueDevice::light_power_set(uint8_t level) {
   device_connect_check();
-  if(level >= 0xFE) level = 0xFE;
+  if (level >= 0xFE)
+    level = 0xFE;
   return this->gatt_write_char_byte("002c", "002f", level);
 }
 
@@ -39,19 +40,17 @@ int HueDevice::light_brightness_notify_get() {
   return this->light_brightness_fd;
 }
 
-HueDevice::Power::Power(HueDevice *p): parent(p) {}
+HueDevice::Power::Power(HueDevice *p) : parent(p) {}
 
 void HueDevice::Power::operator=(const uint8_t level) {
   parent->light_power_set(level);
 }
 
-int HueDevice::Power::operator()() {
-  return parent->light_power_get();
-}
+int HueDevice::Power::operator()() { return parent->light_power_get(); }
 
-HueDevice::Brightness::Brightness(HueDevice *p): parent(p) {}
+HueDevice::Brightness::Brightness(HueDevice *p) : parent(p) {}
 
-void HueDevice::Brightness::operator = (const uint8_t level) {
+void HueDevice::Brightness::operator=(const uint8_t level) {
   parent->light_brightness_set(level);
 }
 
