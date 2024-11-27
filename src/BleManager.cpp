@@ -83,6 +83,7 @@ int BleManager::ble_power_set(int state) {
   ::dbus_error_init(&dbus_error);
   dbus_msg = ::dbus_message_new_method_call(
       "org.bluez", "/org/bluez/hci0", "org.freedesktop.DBus.Properties", "Set");
+
   if (dbus_msg != nullptr) {
     ::dbus_message_iter_init_append(dbus_msg, &iter0);
     ::dbus_message_iter_append_basic(&iter0, DBUS_TYPE_STRING, &adapter);

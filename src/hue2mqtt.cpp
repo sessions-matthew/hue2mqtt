@@ -157,14 +157,11 @@ int main(int argc, const char *argv[]) {
   }
   syslog(LOG_NOTICE, "IP address is %s..", ip.c_str());
 
-  // Wait for DBus to start
-  sleep(5);
-
   // Initialize bluetooth class
   cout << "Initializing bluetooth" << endl;
   while (!bleManager.ble_power_get()) {
     syslog(LOG_NOTICE, "waiting for bluetooth to power on...");
-    bleManager.ble_power_set(1);
+    system("bluetoothctl power on");
     sleep(1);
   }
 
