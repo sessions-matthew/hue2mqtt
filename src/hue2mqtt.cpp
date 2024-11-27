@@ -9,6 +9,7 @@
 #include <syslog.h>
 #include <thread>
 #include <unistd.h>
+#include <ifaddrs.h>
 
 #include "mqtt.hpp"
 #include <json.hpp>
@@ -40,6 +41,7 @@ struct config_s {
 	std::string mqtt_host;
 	std::string mqtt_user;
 	std::string mqtt_pass;
+	std::string client_name;
 	std::vector<struct hue_config_s> hue_lights;
 
 	string toString()
@@ -63,6 +65,7 @@ void from_json(const json &j, struct config_s &c)
 	j.at("mqtt_host").get_to(c.mqtt_host);
 	j.at("mqtt_user").get_to(c.mqtt_user);
 	j.at("mqtt_pass").get_to(c.mqtt_pass);
+	j.at("client_name").get_to(c.client_name);
 
 	for (auto &light : j.at("hue_lights")) {
 		c.hue_lights.emplace_back(light.at("name"), light.at("config_topic"), light.at("availability_topic"),
@@ -95,6 +98,8 @@ int main(int argc, const char *argv[])
 	}
 
 	// Use commandline arguments
+	cout << "Using commandline arguments" << endl;
+	cout << "configPath: " << configPath << endl;
 	if (configPath.length()) {
 		std::ifstream f(configPath);
 		config = json::parse(f);
@@ -104,6 +109,7 @@ int main(int argc, const char *argv[])
 	}
 
 	// Save current process id to file to use in rc scripts
+	cout << "Saving PID to /var/run/hue2mqtt.pid" << endl;
 	FILE *pidfile = fopen("/var/run/hue2mqtt.pid", "w+");
 	if (pidfile) {
 		fprintf(pidfile, "%d", getpid());
@@ -111,10 +117,12 @@ int main(int argc, const char *argv[])
 	}
 
 	// Start system log
+	cout << "Starting system log" << endl;
 	openlog("hue2mqtt", LOG_PID, LOG_DAEMON);
 	syslog(LOG_NOTICE, "hue2mqtt starting up...");
 
 	// Get hostname
+	cout << "Getting hostname" << endl;
 	char hostname[50];
 	if (gethostname(hostname, sizeof(hostname))) {
 		std::cerr << "Could not get hostname" << std::endl;
@@ -122,18 +130,34 @@ int main(int argc, const char *argv[])
 	}
 	syslog(LOG_NOTICE, "hostname is %s..", hostname);
 
-	// Get IP address
-	char ip[50];
-	FILE *fp = popen("hostname -I", "r");
-	if (fp == NULL) {
-		std::cerr << "Could not get IP address" << std::endl;
-		return 0;
+	// get list of ip addressess
+	cout << "Getting IP address" << endl;
+	struct ifaddrs *ifaddr, *ifa;
+	if (getifaddrs(&ifaddr) == -1) {
+		perror("getifaddrs");
+		exit(EXIT_FAILURE);
 	}
-	fgets(ip, sizeof(ip), fp);
-	pclose(fp);
-	syslog(LOG_NOTICE, "IP address is %s..", ip);
+	// convert list of ip addressess into csv string
+	string ip = "";
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr == NULL) {
+			continue;
+		}
+		if (ifa->ifa_addr->sa_family == AF_INET) {
+			char host[NI_MAXHOST];
+			int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+			if (s != 0) {
+				syslog(LOG_ERR, "getnameinfo() failed: %s", gai_strerror(s));
+				exit(EXIT_FAILURE);
+			}
+			ip += host;
+			ip += ",";
+		}
+	}
+	syslog(LOG_NOTICE, "IP address is %s..", ip.c_str());
 
 	// Initialize bluetooth class
+	cout << "Initializing bluetooth" << endl;
 	if (!isTesting) {
 		while (!bleManager.ble_power_get()) {
 			syslog(LOG_NOTICE, "waiting for bluetooth to power on...");
@@ -158,7 +182,7 @@ int main(int argc, const char *argv[])
 	session.init(config.mqtt_host, 1883, "hue2mqtt", config.mqtt_user, config.mqtt_pass);
 
 	// Put hostname and ip address into MQTT
-	session.publish("hue2mqtt/server/" + string(hostname) + "/ip", string(ip), 0, true);
+	session.publish("hue2mqtt/server/" + config.client_name + "/ip", ip, 0, true);
 
 	// Update the current state of each light for home assistant (initialization)
 	cout << "Updating light status..." << endl;
@@ -170,11 +194,15 @@ int main(int argc, const char *argv[])
 		}
 		auto handle = *search;
 		auto bleDevice = (*search)->device;
-		bleDevice->device_connected_set(1);
+		while (!bleDevice->device_connected_get()) {
+			syslog(LOG_NOTICE, "waiting for %s to connect...", bleDevice->devicePath.c_str());
+			bleDevice->device_connected_set(1);
+			sleep(1);
+		}
 		session.subscribe(config.set_topic, 0, 1);
 		syslog(LOG_DEBUG, "publish availability for %s", bleDevice->devicePath.c_str());
 		session.publish(config.availability_topic, bleDevice->device_connected_get() ? "online" : "offline", 0, true);
-		handle->nextAvailable = time(NULL);
+		handle->nextAvailable = 1;
 		handle->nextPower = bleDevice->light_power_get();
 		handle->nextBrightness = bleDevice->light_brightness_get();
 
@@ -221,8 +249,29 @@ int main(int argc, const char *argv[])
 				auto res = json{ { "state", handle->nextPower ? "ON" : "OFF" },
 						 { "brightness", handle->nextBrightness } };
 				syslog(LOG_DEBUG, "publish status for %s", bleDevice->devicePath.c_str());
-				session.publish(config.hue_lights[0].status_topic, res.dump(), 0, true);
+				auto search =
+					find_if(config.hue_lights.begin(), config.hue_lights.end(),
+						[&bleDevice](struct hue_config_s &light) { return light.mac == bleDevice->mac; });
+				if (search != config.hue_lights.end()) {
+					auto &config = *search;
+					session.publish(config.status_topic, res.dump(), 0, true);
+				}
 				handle->nextAvailable = 0;
+			}
+		}
+
+		// Verify device is connected
+		static int timeout0 = 0;
+		if (timeout0++ > 100) {
+			timeout0 = 0;
+			for (auto &handle : lights) {
+				auto &bleDevice = handle->device;
+				if (!bleDevice->device_connected_get()) {
+					syslog(LOG_NOTICE, "%s is disconnected, reconnecting...", bleDevice->devicePath.c_str());
+					bleDevice->light_power_fd = 0;
+					bleDevice->light_brightness_fd = 0;
+					bleDevice->device_connected_set(1);
+				}
 			}
 		}
 
@@ -255,6 +304,7 @@ int main(int argc, const char *argv[])
 				if (search == lights.end()) {
 					continue;
 				}
+				auto handler = *search;
 				auto bleDevice = (*search)->device;
 				if ((available = bleDevice->device_connected_get())) {
 					if (msg.message.starts_with("{")) {
@@ -266,11 +316,23 @@ int main(int argc, const char *argv[])
 						if (req.contains("brightness")) {
 							req.at("brightness").get_to(brightness);
 						}
-						if (state == "ON" || state == "OFF") {
-							bleDevice->light_power_set(state == "ON");
+					} else if (msg.message == "OFF" || msg.message == "ON") {
+            // Handle simple ON/OFF requests  
+						state = msg.message;
+						brightness = bleDevice->light_brightness_get();
+					}
+					if (state == "ON" || state == "OFF") {
+						bleDevice->light_power_set(state == "ON");
+						if (bleDevice->light_power_get() == (state == "ON")) {
+							handler->nextPower = state == "ON";
+							handler->nextAvailable = 1;
 						}
-						if (brightness > 0) {
-							bleDevice->light_brightness_set(brightness);
+					}
+					if (brightness > 0) {
+						bleDevice->light_brightness_set(brightness);
+						if (bleDevice->light_brightness_get() == brightness) {
+							handler->nextBrightness = brightness;
+							handler->nextAvailable = 1;
 						}
 					}
 				}

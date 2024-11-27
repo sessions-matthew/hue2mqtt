@@ -2,6 +2,7 @@
     "mqtt_host": "127.0.0.1",
     "mqtt_user": "user",
     "mqtt_pass": "password",
+    "client_name": "server1",
     "hue_lights": [
         {
             "name": "Test Device",
