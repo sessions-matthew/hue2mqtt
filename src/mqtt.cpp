@@ -271,6 +271,26 @@ bool isValidCommandType(uint8_t control_packet_type) {
 
 void Session::handleSocket() {
   uint8_t header[1];
+
+  if (socket.is_open() == false) {
+    syslog(LOG_ERR, "Socket was closed, reconnecting to server...");
+    isConnected = false;
+    socket.connect(boost::asio::ip::tcp::endpoint(
+        boost::asio::ip::address::from_string(addr), port));
+  }
+
+  if (!isConnected) {
+    syslog(LOG_NOTICE, "Waiting for MQTT connection...");
+    if (!timeout0) {
+      timeout0 = time(NULL);
+    }
+    if (time(NULL) - timeout0 > 10) {
+      timeout0 = 0;
+      syslog(LOG_ERR, "Connection timeout, sending MQTT CONN...");
+      Mqtt::connect(socket, client_id, username, password);
+    }
+  }
+
   if (socket.available() == 0) {
     return;
   }
@@ -303,6 +323,7 @@ void Session::handleSocket() {
            << " Shared Subscription Available: "
            << connack.shared_subscription_available << endl;
       isConnected = true;
+      timeout0 = 0;
     } else if (command == ControlPacketType::PUBLISH) {
       Publish publish = publishFromBytes(header[0], len, recv);
       if (debug) {
@@ -330,6 +351,7 @@ void Session::handleSocket() {
       cout << "Received PINGRESP" << endl;
     } else if (command == ControlPacketType::DISCONNECT) {
       cout << "Received DISCONNECT" << endl;
+      isConnected = false;
     } else {
       cout << "Unhandled response type for " << command << endl;
     }

@@ -129,6 +129,7 @@ class Session {
   string password;
   string addr;
   int port;
+  int timeout0 = 0;
 
 public:
   boost::asio::io_context io_context;
