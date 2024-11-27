@@ -194,18 +194,21 @@ int main(int argc, const char *argv[])
 		}
 		auto handle = *search;
 		auto bleDevice = (*search)->device;
+		// Wait for device to connect
 		while (!bleDevice->device_connected_get()) {
 			syslog(LOG_NOTICE, "waiting for %s to connect...", bleDevice->devicePath.c_str());
 			bleDevice->device_connected_set(1);
 			sleep(1);
 		}
+		// Subscribe to the set topic
 		session.subscribe(config.set_topic, 0, 1);
+		// Publish the availability of the light
 		syslog(LOG_DEBUG, "publish availability for %s", bleDevice->devicePath.c_str());
 		session.publish(config.availability_topic, bleDevice->device_connected_get() ? "online" : "offline", 0, true);
+		// Publish the current state of the light
 		handle->nextAvailable = 1;
 		handle->nextPower = bleDevice->light_power_get();
 		handle->nextBrightness = bleDevice->light_brightness_get();
-
 		// Add light to homeassistant topics
 		auto res = json{ { "name", config.name },
 				 { "command_topic", config.set_topic },
@@ -307,6 +310,7 @@ int main(int argc, const char *argv[])
 				auto handler = *search;
 				auto bleDevice = (*search)->device;
 				if ((available = bleDevice->device_connected_get())) {
+					// Parse the message
 					if (msg.message.starts_with("{")) {
 						// Handle JSON requests
 						auto req = json::parse(msg.message);
@@ -317,10 +321,11 @@ int main(int argc, const char *argv[])
 							req.at("brightness").get_to(brightness);
 						}
 					} else if (msg.message == "OFF" || msg.message == "ON") {
-            // Handle simple ON/OFF requests  
+						// Handle simple ON/OFF requests
 						state = msg.message;
 						brightness = bleDevice->light_brightness_get();
 					}
+					// Set the light to the requested state
 					if (state == "ON" || state == "OFF") {
 						bleDevice->light_power_set(state == "ON");
 						if (bleDevice->light_power_get() == (state == "ON")) {
@@ -328,6 +333,7 @@ int main(int argc, const char *argv[])
 							handler->nextAvailable = 1;
 						}
 					}
+					// Set the brightness to the requested level
 					if (brightness > 0) {
 						bleDevice->light_brightness_set(brightness);
 						if (bleDevice->light_brightness_get() == brightness) {
