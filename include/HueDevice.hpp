@@ -26,8 +26,8 @@ public:
     int operator()();
   } brightness;
 
-  int light_power_fd;
-  int light_brightness_fd;
+  int light_power_fd = 0;
+  int light_brightness_fd = 0;
 
   int light_power_get();
   int light_power_set(uint8_t level);
