@@ -166,9 +166,11 @@ int main(int argc, const char *argv[]) {
   }
 
   // Print config
+  syslog(LOG_NOTICE, "Config is %s", config.toString().c_str());
   cout << config.toString() << endl;
 
   // Initialize Hue lights
+  syslog(LOG_NOTICE, "Initializing Hue lights...");
   vector<hue_device_handle *> lights;
   for (auto &light : config.hue_lights) {
     auto device = new HueDevice(light.mac);
@@ -178,14 +180,17 @@ int main(int argc, const char *argv[]) {
   // Initialize MQTT library
   Mqtt::Session session;
   cout << "Connecting to MQTT broker..." << endl;
-  session.init(config.mqtt_host, 1883, "hue2mqtt", config.mqtt_user,
+  syslog(LOG_NOTICE, "Connecting to MQTT broker...");
+  session.init(config.mqtt_host, 1883, config.client_name, config.mqtt_user,
                config.mqtt_pass);
 
   // Put hostname and ip address into MQTT
+  syslog(LOG_NOTICE, "Publishing hostname and ip address...");
   session.publish("hue2mqtt/server/" + config.client_name + "/ip", ip, 0, true);
 
   // Update the current state of each light for home assistant (initialization)
   cout << "Updating light status..." << endl;
+  syslog(LOG_NOTICE, "Updating light status...");
   for (auto &config : config.hue_lights) {
     auto search = find_if(lights.begin(), lights.end(),
                           [&config](hue_device_handle *light) {
@@ -289,17 +294,17 @@ int main(int argc, const char *argv[]) {
     }
 
     // Handle MQTT protocol
-    session.handleSocket();
+    session.process();
 
     // Wait for new MQTT messages
-    if (session.publish_queue.empty()) {
+    if (session.pub_incoming_queue.empty()) {
       usleep(100000);
       continue;
     }
 
     // Get next MQTT message (from currently subscribed topics)
-    auto msg = session.publish_queue.front();
-    session.publish_queue.pop();
+    auto msg = session.pub_incoming_queue.front();
+    session.pub_incoming_queue.pop();
     syslog(LOG_DEBUG, "Received message from the Broker...");
     syslog(LOG_DEBUG, "\t topic: %s", msg.topic.c_str());
     syslog(LOG_DEBUG, "\t payload: %s", msg.message.c_str());

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <queue>
 #include <stdio.h>
+#include <vector>
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -122,23 +123,37 @@ struct ConnAck {
   bool shared_subscription_available;
 };
 
+struct Subscribe {
+  string topic;
+  uint8_t qos;
+  uint16_t packet_identifier;
+};
+
 class Session {
   bool isConnected = false;
+  bool isDisconnected = false;
   string client_id;
   string username;
   string password;
   string addr;
   int port;
   int timeout0 = 0;
+  int timeout1 = 0;
+
+  bool pingSent = false;
+  bool pingReceived = false;
 
 public:
   boost::asio::io_context io_context;
   boost::asio::ip::tcp::socket socket;
-  queue<Publish> publish_queue;
+  queue<Publish> pub_incoming_queue;
+  queue<Publish> pub_outgoing_queue;
+  vector<Subscribe> subscriptions;
 
   Session() : socket(io_context) {}
   void init(string addr, int port, string client_id, string username,
             string password);
+  void process();
   void handleSocket();
   void connect();
   void publish(string topic, string message, uint8_t qos, bool retain);

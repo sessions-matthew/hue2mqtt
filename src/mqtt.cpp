@@ -251,6 +251,21 @@ void subscribe(boost::asio::ip::tcp::socket &socket, string topic, uint8_t qos,
   delete[] control_packet;
 }
 
+void pingreq(boost::asio::ip::tcp::socket &socket) {
+  uint8_t fixed_header = ControlPacketType::PINGREQ << 4;
+  const size_t buffer_size = 2;
+  uint8_t control_packet[buffer_size];
+
+  control_packet[0] = fixed_header;
+  control_packet[1] = 0;
+
+  if (debug) {
+    cout << "Sending pingreq packet";
+  }
+
+  socket.write_some(boost::asio::buffer(control_packet, buffer_size));
+}
+
 bool isValidCommandType(uint8_t control_packet_type) {
   return control_packet_type == ControlPacketType::CONNECT ||
          control_packet_type == ControlPacketType::CONNACK ||
@@ -269,27 +284,54 @@ bool isValidCommandType(uint8_t control_packet_type) {
          control_packet_type == ControlPacketType::AUTH;
 }
 
+void Session::process() {
+  // reconnect
+  if (isDisconnected) {
+    connect();
+  }
+
+  // publish queued messages
+  if (isConnected && !pub_outgoing_queue.empty()) {
+    Publish pub = pub_outgoing_queue.front();
+    try {
+      Mqtt::publish(socket, pub.topic, pub.message, pub.qos, pub.retain);
+      pub_outgoing_queue.pop();
+    } catch (const std::exception &e) {
+      syslog(LOG_ERR, "Error sending publish packet: %s", e.what());
+      isDisconnected = true;
+      isConnected = false;
+    }
+  }
+
+  // routinely send a ping
+  if (isConnected) {
+    if (timeout1++ > 100) {
+      if (pingSent && !pingReceived) {
+        syslog(LOG_ERR, "Ping not received, disconnecting...");
+        isDisconnected = true;
+        isConnected = false;
+        pingSent = false;
+      }
+      try {
+        Mqtt::pingreq(socket);
+        pingSent = true;
+        pingReceived = false;
+        timeout1 = 0;
+      } catch (const std::exception &e) {
+        syslog(LOG_ERR, "Error sending pingreq packet: %s", e.what());
+        isDisconnected = true;
+        isConnected = false;
+      }
+    }
+  } else {
+    timeout1 = 0;
+  }
+
+  handleSocket();
+}
+
 void Session::handleSocket() {
   uint8_t header[1];
-
-  if (socket.is_open() == false) {
-    syslog(LOG_ERR, "Socket was closed, reconnecting to server...");
-    isConnected = false;
-    socket.connect(boost::asio::ip::tcp::endpoint(
-        boost::asio::ip::address::from_string(addr), port));
-  }
-
-  if (!isConnected) {
-    syslog(LOG_NOTICE, "Waiting for MQTT connection...");
-    if (!timeout0) {
-      timeout0 = time(NULL);
-    }
-    if (time(NULL) - timeout0 > 10) {
-      timeout0 = 0;
-      syslog(LOG_ERR, "Connection timeout, sending MQTT CONN...");
-      Mqtt::connect(socket, client_id, username, password);
-    }
-  }
 
   if (socket.available() == 0) {
     return;
@@ -303,64 +345,72 @@ void Session::handleSocket() {
     socket.read_some(boost::asio::buffer(recv, len));
 
     if (command == ControlPacketType::CONNACK) {
-      cout << "Received CONNACK" << endl;
+      syslog(LOG_NOTICE, "Received CONNACK");
       ConnAck connack = connAckFromBytes(header[0], len, recv);
-      cout << "Session Expiry Interval: "
-           << (int)connack.session_expiry_interval
-           << " Receive Maximum: " << (int)connack.receive_maximum
-           << " Maximum QoS: " << (int)connack.maximum_qos
-           << " Retain Available: " << connack.retain_available
-           << " Maximum Packet Size: " << (int)connack.maximum_packet_size
-           << " Assigned Client Identifier: "
-           << connack.assigned_client_identifier
-           << " Topic Alias Maximum: " << (int)connack.topic_alias_maximum
-           << " Reason String: " << connack.reason_string
-           << " User Property: " << connack.user_property
-           << " Wildcard Subscription Available: "
-           << connack.wildcard_subscription_available
-           << " Subscription Identifier Available: "
-           << connack.subscription_identifier_available
-           << " Shared Subscription Available: "
-           << connack.shared_subscription_available << endl;
+      syslog(LOG_NOTICE,
+             "Session Expiry Interval: %d Receive Maximum: %d Maximum QoS: %d "
+             "Retain Available: %d Maximum Packet Size: %d Assigned Client "
+             "Identifier: %s Topic Alias Maximum: %d Reason String: %s User "
+             "Property: %s Wildcard Subscription Available: %d Subscription "
+             "Identifier Available: %d Shared Subscription Available: %d",
+             (int)connack.session_expiry_interval, (int)connack.receive_maximum,
+             (int)connack.maximum_qos, connack.retain_available,
+             (int)connack.maximum_packet_size,
+             connack.assigned_client_identifier.c_str(),
+             (int)connack.topic_alias_maximum, connack.reason_string.c_str(),
+             connack.user_property.c_str(),
+             connack.wildcard_subscription_available,
+             connack.subscription_identifier_available,
+             connack.shared_subscription_available);
       isConnected = true;
       timeout0 = 0;
     } else if (command == ControlPacketType::PUBLISH) {
       Publish publish = publishFromBytes(header[0], len, recv);
       if (debug) {
-        cout << "Received PUBLISH" << endl;
-        cout << "QoS: " << (int)publish.qos << " Retain: " << publish.retain
-             << " Packet Identifier: " << publish.packet_identifier
-             << " Topic: " << publish.topic << " Message: " << publish.message
-             << endl;
+        syslog(LOG_NOTICE, "Received PUBLISH");
+        syslog(LOG_NOTICE,
+               "QoS: %d Retain: %d Packet Identifier: %d Topic: %s Message: %s",
+               (int)publish.qos, publish.retain, publish.packet_identifier,
+               publish.topic.c_str(), publish.message.c_str());
       }
 
-      publish_queue.push(publish);
+      pub_incoming_queue.push(publish);
     } else if (command == ControlPacketType::PUBACK) {
-      cout << "Received PUBACK" << endl;
+      syslog(LOG_NOTICE, "Received PUBACK");
     } else if (command == ControlPacketType::PUBREC) {
-      cout << "Received PUBREC" << endl;
+      syslog(LOG_NOTICE, "Received PUBREC");
     } else if (command == ControlPacketType::PUBREL) {
-      cout << "Received PUBREL" << endl;
+      syslog(LOG_NOTICE, "Received PUBREL");
     } else if (command == ControlPacketType::PUBCOMP) {
-      cout << "Received PUBCOMP" << endl;
+      syslog(LOG_NOTICE, "Received PUBCOMP");
     } else if (command == ControlPacketType::SUBACK) {
-      cout << "Received SUBACK" << endl;
+      syslog(LOG_NOTICE, "Received SUBACK");
     } else if (command == ControlPacketType::PINGREQ) {
-      cout << "Received PINGREQ" << endl;
+      syslog(LOG_NOTICE, "Received PINGREQ");
     } else if (command == ControlPacketType::PINGRESP) {
-      cout << "Received PINGRESP" << endl;
+      syslog(LOG_NOTICE, "Received PINGRESP");
+      pingReceived = true;
     } else if (command == ControlPacketType::DISCONNECT) {
-      cout << "Received DISCONNECT" << endl;
+      syslog(LOG_NOTICE, "Received DISCONNECT");
       isConnected = false;
     } else {
-      cout << "Unhandled response type for " << command << endl;
+      syslog(LOG_NOTICE, "Unhandled response type for %d", command);
     }
 
     if (debug) {
       for (int i = 0; i < len; i++) {
+        syslog(LOG_DEBUG, " %u", (unsigned int)recv[i]);
+      }
+      if (len) {
+        syslog(LOG_DEBUG, "\n");
+      }
+
+      for (int i = 0; i < len; i++) {
         cout << " " << (unsigned int)recv[i];
       }
-      cout << endl;
+      if (len) {
+        cout << endl;
+      }
     }
 
     delete[] recv;
@@ -376,39 +426,76 @@ void Session::init(string addr, int port, string client_id, string username,
   this->addr = addr;
   this->port = port;
 
-  socket.connect(boost::asio::ip::tcp::endpoint(
-      boost::asio::ip::address::from_string(addr), port));
+  try {
+    socket.connect(boost::asio::ip::tcp::endpoint(
+        boost::asio::ip::address::from_string(addr), port));
 
-  connect();
+    connect();
+  } catch (const std::exception &e) {
+    syslog(LOG_ERR, "Error connecting to MQTT server: %s", e.what());
+    sleep(1);
+  }
 }
 void Session::connect() {
   int timeout = 0;
-  Mqtt::connect(socket, client_id, username, password);
-  while (!isConnected) {
-    if (timeout++ > 10) {
-      timeout = 0;
-      syslog(LOG_ERR, "Connection timeout...");
 
-      Mqtt::connect(socket, client_id, username, password);
+  if (isDisconnected && socket.is_open()) {
+    syslog(LOG_NOTICE, "Disconnecting from MQTT server...");
+    socket.close();
+    isConnected = false;
+    try {
+      socket.connect(boost::asio::ip::tcp::endpoint(
+          boost::asio::ip::address::from_string(addr), port));
+    } catch (const std::exception &e) {
+      syslog(LOG_ERR, "Error connecting to MQTT server: %s", e.what());
+      sleep(1);
     }
+  }
 
+  if (!isConnected) {
+    syslog(LOG_NOTICE, "Waiting for MQTT connection...");
+    try {
+      Mqtt::connect(socket, client_id, username, password);
+      isDisconnected = false;
+    } catch (const std::exception &e) {
+      syslog(LOG_ERR, "Error sending connect packet: %s", e.what());
+      isDisconnected = true;
+    }
+  }
+
+  while (timeout++ < 10) {
+    if (isConnected) {
+      break;
+    }
     syslog(LOG_NOTICE, "Waiting for MQTT connection...");
     handleSocket();
     sleep(1);
   }
+  if (isConnected) {
+    syslog(LOG_NOTICE, "Connected to MQTT server");
+    for (auto &sub : subscriptions) {
+      syslog(LOG_NOTICE, "Resubscribing to %s", sub.topic.c_str());
+      Mqtt::subscribe(socket, sub.topic, sub.qos, sub.packet_identifier);
+    }
+  }
 }
+
 void Session::publish(string topic, string message, uint8_t qos, bool retain) {
-  while (!isConnected) {
-    handleSocket();
-    sleep(1);
-  }
-  Mqtt::publish(socket, topic, message, qos, retain);
+  pub_outgoing_queue.push({qos, retain, 1, topic, message});
 }
+
 void Session::subscribe(string topic, uint8_t qos, uint16_t packet_identifier) {
-  while (!isConnected) {
-    handleSocket();
-    sleep(1);
+  auto search =
+      find_if(subscriptions.begin(), subscriptions.end(),
+              [&topic](Subscribe &sub) { return sub.topic == topic; });
+  if (search != subscriptions.end()) {
+    return;
   }
-  Mqtt::subscribe(socket, topic, qos, packet_identifier);
+  subscriptions.push_back({topic, qos, packet_identifier});
+  try {
+    Mqtt::subscribe(socket, topic, qos, packet_identifier);
+  } catch (const std::exception &e) {
+    isDisconnected = true;
+  }
 }
 } // namespace Mqtt
