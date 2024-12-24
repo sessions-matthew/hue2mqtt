@@ -16,3 +16,17 @@ executable(
     dependencies: deps,
     include_directories: incdir,
 )
+
+executable(
+    'testing',
+    'src/testing.cpp',
+    install: true,
+    sources: [
+        './src/BleManager.cpp',
+        './src/BleDevice.cpp',
+        './src/HueDevice.cpp',
+        './src/mqtt.cpp',
+    ],
+    dependencies: deps,
+    include_directories: incdir,
+)
