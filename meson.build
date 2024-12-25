@@ -1,7 +1,7 @@
 project('hue2mqtt', ['cpp', 'c'], default_options: ['cpp_std=c++20'])
 
 deps = [dependency('dbus-1'), dependency('libcrypto'), dependency('libssl')]
-incdir = include_directories('/home/user/boost_1_86_0', './include')
+incdir = include_directories('./include', '/usr/include/boost')
 
 executable(
     'hue2mqtt',
