@@ -94,6 +94,6 @@
         "typeindex": "cpp",
         "variant": "cpp"
     },
-    "C_Cpp.default.compileCommands": "/home/user/buildroot-2024.08-rc3/package/hue2mqtt/builddir/compile_commands.json",
+    "C_Cpp.default.compileCommands": "/home/debian/buildroot/buildroot-rpi2rt/package/hue2mqtt/builddir/compile_commands.json",
     "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild"
 }
